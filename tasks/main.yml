@@ -1,32 +1,39 @@
 ---
 # tasks file for common
-- name: install requirements
+- name: Install requirements
   package:
-    name: "{{ common_requirements }}"
+    name: '{{ common_requirements }}'
     state: present
   register: common_install_requirements
   until: common_install_requirements is succeeded
   retries: 3
+  become: yes
+  when:
+    - ansible_pkg_mgr != 'unknown'
+    - ansible_pkg_mgr != 'atomic_container'
 
-- name: check for network manager
+- name: Check for network manager
   stat:
     path: /etc/NetworkManager/NetworkManager.conf
   register: common_check_for_network_manager
+  become: yes
 
-- name: set nameserver in resolv.conf
+- name: Set nameserver in resolv.conf
   lineinfile:
     path: /etc/resolv.conf
-    line: "nameserver {{ item }}"
+    line: 'nameserver {{ item }}'
   with_items:
-    - "{{ common_nameservers }}"
+    - '{{ common_nameservers }}'
   when:
     - common_nameservers is defined
     - not common_check_for_network_manager.stat.exists
     - ansible_virtualization_type != "docker"
+    - common_set_nameservers
   notify:
-    - gather facts
+    - Gather facts
+  become: yes
 
-- name: set nameservers in network manager
+- name: Set nameservers in network manager
   ini_file:
     path: /etc/NetworkManager/conf.d/dnsservers.conf
     section: global-dns-domain-*
@@ -34,32 +41,35 @@
     value: "{{ common_nameservers | join(',') }}"
   when:
     - common_check_for_network_manager.stat.exists
+    - common_set_nameservers
   notify:
-    - reload network manager
-    - gather facts
+    - Reload network manager
+    - Gather facts
+  become: yes
 
-- name: flush handlers
+- name: Flush handlers
   meta: flush_handlers
 
-- name: set hostname
+- name: Set hostname
   hostname:
-    name: "{{ common_hostname }}"
+    name: '{{ hostname | default(ansible_host) }}'
   when:
     - ansible_virtualization_type != "docker"
   register: set_hostname
 
-- name: reboot for hostname
+- name: Reboot for hostname
   include_role:
-    name: robertdebock.reboot
+    name: reboot
   when:
     - set_hostname.changed
     - common_reboot | bool
   tags:
     - skip_ansible_lint
 
-- name: fill /etc/hosts
+- name: Fill /etc/hosts
   template:
     src: hosts.j2
     dest: /etc/hosts
   when:
     - ansible_virtualization_type != "docker"
+    - common_set_hosts_file
